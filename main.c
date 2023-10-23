@@ -6,6 +6,12 @@
 #define BLOCK_SIZE 16
 #define DEBUG_PRINT printf
 
+// stałe związane z rozszerzaniem klucza
+const int Nr = 10; // Liczba rund
+const int Nk = 4;  // Liczba słów w kluczu
+
+uint8_t secret_key[16] = {'k', 'k', 'k', 'k', 'e', 'e', 'e', 'e', 'y', 'y', 'y', 'y', '.', '.', '.', '.'};
+
 static const uint8_t sbox[256] = {
   //0     1    2      3     4    5     6     7      8    9     A      B    C     D     E     F
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -43,7 +49,184 @@ static const uint8_t rsbox[256] = {
   0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
   0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d };
 
-void create_blocks(char** blocks, int num_blocks, long file_size, char *file_content){
+const uint8_t Rcon[10] = {
+  0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
+};
+
+uint8_t getSBoxValue(uint8_t value){
+  return sbox[value];
+}
+
+uint8_t getSBoxInvert(uint8_t value){
+  return rsbox[value];
+}
+
+/*****************************************************************************/
+/* Encoded blocks section:                                                   */
+/*****************************************************************************/
+
+uint8_t GF_Mult(uint8_t a, uint8_t b) {
+  uint8_t result = 0;
+  uint8_t shiftGreaterThan255 = 0;
+
+  // Loop through each bit in `b`
+  for (uint8_t i = 0; i < 8; i++) {
+    // If the LSB is set (i.e. we're not multiplying out by zero for this polynomial term)
+    // then we xor the result with `a` (i.e. adding the polynomial terms of a)
+    if (b & 1) {
+      result ^= a;
+    }
+
+    // Double `a`, keeping track of whether that causes `a` to "leave" the field.
+    shiftGreaterThan255 = a & 0x80;
+    a <<= 1;
+
+    // The next bit we look at in `b` will represent multiplying the terms in `a`
+    // by the next power of 2, which is why we can achieve the same result by shifting `a` left.
+    // If `a` left the field, we need to modulo with irreducible polynomial term.
+    if (shiftGreaterThan255) {
+      // Note that we use 0x1b instead of 0x11b. If we weren't taking advantage of
+      // u8 overflow (i.e. by using u16, we would use the "real" term)
+      a ^= 0x1b;
+    }
+
+    // Shift `b` down in order to look at the next LSB (worth twice as much in the multiplication)
+    b >>= 1;
+  }
+
+  return result;
+}
+
+void SubBytes(uint8_t *state){
+  int i;
+  // substitute all the values from the state with the value in the SBox
+  for (i = 0; i < 16; i++)
+    state[i] = getSBoxValue(state[i]);
+}
+
+void ShiftRows(uint8_t *state){
+    uint8_t temp;
+
+    // Rotate first row 1 columns to left
+    temp = state[4];
+    state[4] = state[5];
+    state[5] = state[6];
+    state[6] = state[7];
+    state[7] = temp;
+
+    // Rotate second row 2 columns to left 
+    temp = state[8];
+    state[8] = state[10];
+    state[10] = temp;
+    temp = state[9];
+    state[9] = state[11];
+    state[11] = state[9];
+
+    // Rotate third row 3 columns to left
+    temp = state[15];
+    state[15] = state[14];
+    state[14] = state[13];
+    state[13] = state[12];
+    state[12] = temp;
+}
+
+void MixColumns(uint8_t *state){
+  int i,j;
+  uint8_t column[4];
+  uint8_t temp_state[] = { 0, 0, 0, 0 };
+
+  for(i = 0; i < 4; i++){
+    for(j=0; j < 4; j++){
+      int index = (j*4) + i;
+      column[4] = state[index];
+    }
+
+    // mix process on single column
+    temp_state[0] = GF_Mult(0x02, column[0]) ^ GF_Mult(0x03, column[1]) ^ column[2] ^ column[3];
+    temp_state[1] = column[0] ^ GF_Mult(0x02, column[1]) ^ GF_Mult(0x03, column[2]) ^ column[3];
+    temp_state[2] = column[0] ^ column[1] ^ GF_Mult(0x02, column[2]) ^ GF_Mult(0x03, column[3]);
+    temp_state[3] = GF_Mult(0x03, column[0]) ^ column[1] ^ column[2] ^ GF_Mult(0x02, column[3]);
+
+    for (int i = 0; i < 4; i++) {
+      column[i] = temp_state[i];
+    }
+  }
+}
+
+void AddRoundKey(){
+
+}
+
+/*****************************************************************************/
+/* Key initialization section:                                               */
+/*****************************************************************************/
+
+// Funkcja do rotacji bajtów w słowie
+void RotWord(uint8_t *word) {
+    uint8_t temp = word[0];
+    word[0] = word[1];
+    word[1] = word[2];
+    word[2] = word[3];
+    word[3] = temp;
+}
+
+// Funkcja do podstawowej operacji zamiany bajtów
+void SubWord(uint8_t *word) {
+    for (int i = 0; i < 4; i++) {
+        word[i] = getSBoxValue(word[i]); // SBox to tablica zdefiniowana w AES
+    }
+}
+
+void KeyExpansion(uint8_t* roundKeys, const uint8_t* key){
+  uint8_t temp[4];
+    
+    for (int i = 0; i < Nk; i++) {
+        for (int j = 0; j < 4; j++) {
+            roundKeys[(i * 4) + j] = key[(i * 4) + j];
+        }
+    }
+    
+    for (int i = Nk; i < (Nr + 1) * 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            temp[j] = roundKeys[(i - 1) * 4 + j];
+        }
+
+        if (i % Nk == 0) {
+            RotWord(temp);
+            SubWord(temp);
+            temp[0] ^= Rcon[(i / Nk) - 1];
+        } else if (Nk > 6 && i % Nk == 4) {
+            SubWord(temp);
+        }
+        
+        for (int j = 0; j < 4; j++) {
+            roundKeys[i * 4 + j] = roundKeys[(i - Nk) * 4 + j] ^ temp[j];
+        }
+    }
+}
+
+/*****************************************************************************/
+/* Decoded blocks section:                                                   */
+/*****************************************************************************/
+
+void InvertSubBytes(uint8_t *state){
+  int i;
+  for (i = 0; i < 16; i++)
+    state[i] = getSBoxInvert(state[i]);
+}
+
+/*****************************************************************************/
+/* Logic section:                                                            */
+/*****************************************************************************/
+
+void AES_OperationScheduler(){
+
+}
+
+void create_blocks(char** blocks, int num_blocks, long file_size, uint8_t *file_content){
+    // declariation of roundKeys array for KeyExpansion function
+    uint8_t roundKeys[(Nr + 1) * 4 * 4];
+
     #pragma omp parallel for
     for (int i = 0; i < num_blocks; i++) {
         int block_start = i * BLOCK_SIZE;
@@ -58,6 +241,11 @@ void create_blocks(char** blocks, int num_blocks, long file_size, char *file_con
             blocks[i][j] = file_content[block_start + j];
         }
         blocks[i][block_size] = '\0';
+
+        SubBytes(blocks[i]);
+        KeyExpansion(roundKeys, secret_key);
+        ShiftRows(blocks[i]);
+        InvertSubBytes(blocks[i]);
 
         // Transform to hexadecimal and print
         for (int j = 0; j < block_size; j++) {
@@ -81,7 +269,7 @@ int main() {
     long file_size = ftell(file);
     rewind(file);
 
-    char *file_content = (char *)malloc(file_size + 1);
+    uint8_t *file_content = (uint8_t *)malloc(file_size + 1);
     if (file_content == NULL) {
         perror("Memory allocation error");
         fclose(file);
