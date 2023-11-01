@@ -219,10 +219,59 @@ void KeyExpansion(uint8_t* roundKeys, const uint8_t* key){
 /* Decoded blocks section:                                                   */
 /*****************************************************************************/
 
-void InvertSubBytes(uint8_t *state){
+void InvSubBytes(uint8_t *state){
   int i;
   for (i = 0; i < 16; i++)
     state[i] = getSBoxInvert(state[i]);
+}
+
+void InvShiftRows(uint8_t *state){
+    uint8_t temp;
+
+    // first row, shift 1 to right
+    temp = state[7];
+    state[7] = state[6];
+    state[6] = state[5];
+    state[5] = state[4];
+    state[4] = temp;
+
+    // second row, shift 2 to right 
+    temp = state[11];
+    state[11] = state[9];
+    state[9] = temp;
+    temp = state[10];
+    state[10] = state[8];
+    state[8] = temp;
+
+    // third row, shift 3 to right
+    temp = state[12];
+    state[12] = state[13];
+    state[13] = state[14];
+    state[14] = state[15];
+    state[15] = temp;
+}
+
+void InvMixColumns(uint8_t *state){
+  int i,j;
+  uint8_t column[4];
+  uint8_t temp_state[] = { 0, 0, 0, 0 };
+
+  for(i = 0; i < 4; i++){
+    for(j=0; j < 4; j++){
+      int index = (j*4) + i;
+      column[j] = state[index];
+    }
+
+    // mix process on single column
+    temp_state[0] = GF_Mult(0x0e, column[0]) ^ GF_Mult(0x0b, column[1]) ^ GF_Mult(0x0d, column[2]) ^ GF_Mult(0x09, column[3]);
+    temp_state[1] = GF_Mult(0x09, column[0]) ^ GF_Mult(0x0e, column[1]) ^ GF_Mult(0x0b, column[2]) ^ GF_Mult(0x0d, column[3]);
+    temp_state[2] = GF_Mult(0x0d, column[0]) ^ GF_Mult(0x09, column[1]) ^ GF_Mult(0x0e, column[2]) ^ GF_Mult(0x0b, column[3]);
+    temp_state[3] = GF_Mult(0x0b, column[0]) ^ GF_Mult(0x0d, column[1]) ^ GF_Mult(0x09, column[2]) ^ GF_Mult(0x0e, column[3]);
+
+    for (int j = 0; j < 4; j++) {
+      state[(j * 4) + i] = temp_state[j];
+    }
+  }
 }
 
 /*****************************************************************************/
@@ -241,10 +290,8 @@ void AES_Cipher(uint8_t *state, const uint8_t* RoundKey){
 		}
 	}
 
-
   // Add the First round key to the state before starting the rounds.
   AddRoundKey(0, temp, RoundKey);
-
 
   // encryption round
   for (round = 1; ; ++round)
@@ -258,7 +305,6 @@ void AES_Cipher(uint8_t *state, const uint8_t* RoundKey){
     AddRoundKey(round, temp, RoundKey);
   }
 
-
   // Add round key to last round
   AddRoundKey(Nr, temp, RoundKey);
 
@@ -269,9 +315,48 @@ void AES_Cipher(uint8_t *state, const uint8_t* RoundKey){
 	}
 
   for(int i = 0; i <16; i++){
-    DEBUG_PRINT("%02x ", state[i]);
+    // DEBUG_PRINT("%02x ", state[i]);
   }
 }
+
+void AES_Inv_Cipher(uint8_t *state, const uint8_t* RoundKey){
+  uint8_t round = 0;
+  uint8_t temp[4*Nb];
+	uint8_t i, j;
+
+  // Rotate rows
+  for (i = 0; i < 4; i++) {
+		for (j = 0; j < Nb; j++) {
+			temp[Nb*i+j] = state[i+4*j];
+		}
+	}
+
+  AddRoundKey(Nr, temp, RoundKey);
+
+  // decryption round
+  for (round = (Nr - 1); ; --round)
+  {
+    InvShiftRows(temp);
+    InvSubBytes(temp);
+    AddRoundKey(round, temp, RoundKey);
+    if (round == 0) {
+      break;
+    }
+    InvMixColumns(temp);
+  }
+
+  for (i = 0; i < 4; i++) {
+		for (j = 0; j < Nb; j++) {
+			state[i+4*j] = temp[Nb*i+j];
+		} 
+	}
+
+  for(int i = 0; i <16; i++){
+    DEBUG_PRINT("%c ", state[i]);
+  }
+}
+
+
 
 void create_blocks(char** blocks, int num_blocks, long file_size, uint8_t *file_content){
     // declariation of roundKeys array for KeyExpansion function
@@ -296,9 +381,12 @@ void create_blocks(char** blocks, int num_blocks, long file_size, uint8_t *file_
         KeyExpansion(roundKeys, secret_key);
         AES_Cipher(blocks[i], roundKeys);
 
+        // decryption
+        AES_Inv_Cipher(blocks[i], roundKeys);
+
         // Transform to hexadecimal and print
         for (int j = 0; j < block_size; j++) {
-          // DEBUG_PRINT("%02x ", blocks[i][j]);
+          // DEBUG_PRINT("%c ", blocks[i][j]);
         }
         DEBUG_PRINT("\n");
     }
