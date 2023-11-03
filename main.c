@@ -8,9 +8,9 @@
 // The number of columns comprising a state in AES. This is a constant in AES. Value=4
 #define Nb 4
 
-// stałe związane z rozszerzaniem klucza
-const int Nr = 10; // Liczba rund
-const int Nk = 4;  // Liczba słów w kluczu
+// const related to key expansion
+const int Nr = 10; // Number of rounds
+const int Nk = 4;  // Number of words in the key
 
 uint8_t secret_key[16] = {'k', 'k', 'k', 'k', 'e', 'e', 'e', 'e', 'y', 'y', 'y', 'y', '.', '.', '.', '.'};
 
@@ -171,7 +171,7 @@ void AddRoundKey(uint8_t round, uint8_t *state, const uint8_t* RoundKey){
 /* Key initialization section:                                               */
 /*****************************************************************************/
 
-// Funkcja do rotacji bajtów w słowie
+// Function to rotate bytes in a word
 void RotWord(uint8_t *word) {
     uint8_t temp = word[0];
     word[0] = word[1];
@@ -180,10 +180,10 @@ void RotWord(uint8_t *word) {
     word[3] = temp;
 }
 
-// Funkcja do podstawowej operacji zamiany bajtów
+// Function for basic byte replacement operations
 void SubWord(uint8_t *word) {
     for (int i = 0; i < 4; i++) {
-        word[i] = getSBoxValue(word[i]); // SBox to tablica zdefiniowana w AES
+        word[i] = getSBoxValue(word[i]);
     }
 }
 
@@ -314,9 +314,9 @@ void AES_Cipher(uint8_t *state, const uint8_t* RoundKey){
 		}
 	}
 
-  for(int i = 0; i <16; i++){
+  // for(int i = 0; i <16; i++){
     // DEBUG_PRINT("%02x ", state[i]);
-  }
+  // }
 }
 
 void AES_Inv_Cipher(uint8_t *state, const uint8_t* RoundKey){
@@ -351,50 +351,90 @@ void AES_Inv_Cipher(uint8_t *state, const uint8_t* RoundKey){
 		} 
 	}
 
-  for(int i = 0; i <16; i++){
-    DEBUG_PRINT("%c ", state[i]);
-  }
+  // for(int i = 0; i <16; i++){
+    // DEBUG_PRINT("%c ", state[i]);
+  // }
 }
-
-
 
 void create_blocks(char** blocks, int num_blocks, long file_size, uint8_t *file_content){
     // declariation of roundKeys array for KeyExpansion function
     uint8_t roundKeys[(Nr + 1) * 4 * 4];
+    int i;
 
-    // #pragma omp parallel for
-    for (int i = 0; i < num_blocks; i++) {
+    #pragma omp parallel for shared(blocks, roundKeys) private(i)
+    for (i = 0; i < num_blocks; i++) {
+        int temp;
         int block_start = i * BLOCK_SIZE;
         int block_end = (i + 1) * BLOCK_SIZE;
         if (block_end > file_size)
             block_end = file_size;
 
         int block_size = block_end - block_start;
-        blocks[i] = (char *)malloc(block_size + 1);
+
+        blocks[i] = (char *)malloc(BLOCK_SIZE + 1);
 
         for (int j = 0; j < block_size; j++) {
             blocks[i][j] = file_content[block_start + j];
         }
-        blocks[i][block_size] = '\0';
+
+        if(i == num_blocks - 1){
+          for (int j = block_size; j < BLOCK_SIZE; j++) {
+            blocks[i][j] = (char)(BLOCK_SIZE - block_size);
+          }
+        }
+
+        blocks[i][BLOCK_SIZE] = '\0';
 
         // Cipher operations
         KeyExpansion(roundKeys, secret_key);
         AES_Cipher(blocks[i], roundKeys);
+    }
+
+
+}
+
+void create_blocks_decryption(char** blocks, int num_blocks, long file_size, uint8_t *file_content){
+    // declariation of roundKeys array for KeyExpansion function
+    uint8_t roundKeys[(Nr + 1) * 4 * 4];
+    int i;
+
+    #pragma omp parallel for shared(blocks, roundKeys) private(i)
+    for (i = 0; i < num_blocks; i++) {
+        int block_start = i * BLOCK_SIZE;
+        int block_end = (i + 1) * BLOCK_SIZE;
+        if (block_end > file_size)
+            block_end = file_size;
+
+        int block_size = block_end - block_start;
+
+        for (int j = 0; j < block_size; j++) {
+            blocks[i][j] = file_content[block_start + j];
+        }
+
+        blocks[i][block_size] = '\0';
 
         // decryption
+        KeyExpansion(roundKeys, secret_key);
         AES_Inv_Cipher(blocks[i], roundKeys);
 
-        // Transform to hexadecimal and print
-        for (int j = 0; j < block_size; j++) {
-          // DEBUG_PRINT("%c ", blocks[i][j]);
+        // delete padding
+        int temp = (int)blocks[num_blocks - 1][15];
+        if(i == (num_blocks-1)){
+          // DEBUG_PRINT("%s", "temp");
+          for (int j = BLOCK_SIZE - 1; j > 0; j--) {
+            if((int)blocks[i][j] <= 16 ){
+              blocks[i][j] = '\0';
+            }
+          }
         }
-        DEBUG_PRINT("\n");
     }
 }
 
 int main() {
     FILE *file;
-    const char* file_name = "PAN TADEUSZ Z KOMENTARZAMI.txt";
+    FILE *file2;
+    int index;
+    const char* file_name = "pro_sulla.txt";
 
     file = fopen(file_name, "r");
     if (file == NULL) {
@@ -428,12 +468,62 @@ int main() {
 
     create_blocks(blocks, num_blocks, file_size, file_content);
 
+    file = fopen("Encrypted_message.txt", "wb");
+    if (file == NULL) {
+        perror("Error opening the output file");
+        exit(1);
+    }
+
+    for (int j = 0; j < num_blocks; j++) {
+      for(int i = 0; i< BLOCK_SIZE; i++)
+        fprintf(file, "%c", blocks[j][i]);
+    }
+    fclose(file);
+
+    file = fopen("Encrypted_message.txt", "rb");
+    if (file == NULL) {
+        perror("Error opening the file");
+        return 1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    file_size = ftell(file);
+    rewind(file);
+
+    uint8_t *file_content2 = (uint8_t *)malloc(file_size + 1);
+    if (file_content2 == NULL) {
+        perror("Memory allocation error");
+        fclose(file2);
+        return 1;
+    }
+
+    fread(file_content2, file_size, 1, file);
+    fclose(file);
+    file_content2[file_size] = '\0';
+    
+
+    create_blocks_decryption(blocks, num_blocks, file_size, file_content2);
+
+    file = fopen("Decrypted_message.txt", "wb");
+    if (file == NULL) {
+        perror("Error opening the output file");
+        exit(1);
+    }
+
+    // Write the contents of 'blocks' to the file
+    for (int j = 0; j < num_blocks; j++) {
+        for(int i = 0; i< BLOCK_SIZE; i++)
+          fprintf(file, "%c", blocks[j][i]);
+    }
+    fclose(file);
+
     // Clean up
     for (int i = 0; i < num_blocks; i++) {
         free(blocks[i]);
     }
     free(blocks);
     free(file_content);
+    free(file_content2);
 
     return 0;
 }
