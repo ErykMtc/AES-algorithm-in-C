@@ -29,3 +29,13 @@ Run:
 ```shell
 mpirun -np 4 ./MPImain
 ```
+
+Compile the parallelized version (using MPI and OpenMP): 
+```shell
+mpicc -fopenmp aes.c MIXmain.c -o MIXmain
+```
+
+Run:
+```shell
+mpirun -np 4 ./MIXmain
+```

@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "aes.h"
+#include <omp.h>
 #include <mpi.h>
 
 // Function for AES encryption
 void encrypt_blocks(char* blocks, int num_blocks, uint8_t* roundKeys) {
+    #pragma omp parallel for shared(blocks, roundKeys)
     for (int i = 0; i < num_blocks; i++) {
         int block_offset = i * BLOCK_SIZE;
         AES_Cipher(&blocks[block_offset], roundKeys);
@@ -14,6 +16,7 @@ void encrypt_blocks(char* blocks, int num_blocks, uint8_t* roundKeys) {
 
 // Function for AES decryption
 void decrypt_blocks(char* blocks, int num_blocks, uint8_t* roundKeys) {
+    #pragma omp parallel for shared(blocks, roundKeys)
     for (int i = 0; i < num_blocks; i++) {
         int block_offset = i * BLOCK_SIZE;
         AES_Inv_Cipher(&blocks[block_offset], roundKeys);
