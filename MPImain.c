@@ -8,6 +8,7 @@
 void encrypt_blocks(char* blocks, int num_blocks, uint8_t* roundKeys) {
     for (int i = 0; i < num_blocks; i++) {
         int block_offset = i * BLOCK_SIZE;
+        KeyExpansion(roundKeys, secret_key);
         AES_Cipher(&blocks[block_offset], roundKeys);
     }
 }
@@ -16,6 +17,7 @@ void encrypt_blocks(char* blocks, int num_blocks, uint8_t* roundKeys) {
 void decrypt_blocks(char* blocks, int num_blocks, uint8_t* roundKeys) {
     for (int i = 0; i < num_blocks; i++) {
         int block_offset = i * BLOCK_SIZE;
+        KeyExpansion(roundKeys, secret_key);
         AES_Inv_Cipher(&blocks[block_offset], roundKeys);
     }
 }
@@ -53,7 +55,7 @@ int main(int argc, char *argv[]) {
         StartTime = MPI_Wtime();
 
         // Key Expansion once
-        KeyExpansion(roundKeys, secret_key);
+        // KeyExpansion(roundKeys, secret_key);
     }
 
     MPI_Bcast(&file_size, 1, MPI_LONG, 0, MPI_COMM_WORLD);
@@ -90,7 +92,7 @@ int main(int argc, char *argv[]) {
     // Decryption Phase
     if (rank == 0) {
         FILE *file;
-        const char* file_name = "Encrypted_message.txt"; // Change this to your encrypted file
+        const char* file_name = "Encrypted_message.txt";
 
         file = fopen(file_name, "rb");
         if (file == NULL) {
