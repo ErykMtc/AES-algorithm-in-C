@@ -2,3 +2,5 @@
 *.txt
 !pro_sulla.txt
 .vscode
+main3.c
+MPIMain

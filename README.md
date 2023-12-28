@@ -19,3 +19,13 @@ Run:
 ```shell
 ./main
 ```
+
+Compile the parallelized version (using MPI): 
+```shell
+mpicc aes.c MPImain.c -o MPImain
+```
+
+Run:
+```shell
+mpirun -np 4 ./MPImain
+```
